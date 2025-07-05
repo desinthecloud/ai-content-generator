@@ -1,4 +1,5 @@
 AI Content Generator with Bedrock
+
 This project uses Amazon Bedrock + Claude 2.1 to generate high-quality AI content via a Lambda backend and Streamlit frontend.
 
 Features
