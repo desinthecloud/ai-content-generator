@@ -1,0 +1,201 @@
+Project: AI Content Generator with Bedrock
+Domain: Generative AI (Claude 2.1 via Bedrock)
+Tools: AWS Lambda · Amazon Bedrock · API Gateway (HTTP) · Streamlit
+
+✅ PHASE 1: Amazon Bedrock & IAM Setup
+Step 1.1 – Enable Amazon Bedrock Access
+Go to: https://console.aws.amazon.com/bedrock
+
+Region: us-east-1
+
+In the left sidebar, click Model access
+
+Enable:
+Claude 2.1 (Model ID: anthropic.claude-v2:1)
+
+(Optional: Titan)
+
+Accept the terms if prompted
+Wait for approval (can take minutes to a few hours)
+
+Step 1.2 – Create IAM Role for Lambda
+Go to IAM > Roles > Create Role
+
+Use case: AWS Lambda
+
+Attach these policies:
+AmazonBedrockFullAccess
+CloudWatchLogsFullAccess
+Name it: lambda-bedrock-role
+Copy the Role ARN for use in Phase 2
+
+✅ PHASE 2: Lambda Function
+Step 2.1 – Write the Lambda Code
+In your project folder, create a folder called lambda, and inside it a file called lambda_function.py:
+
+python
+
+import boto3
+import json
+
+def lambda_handler(event, context):
+    try:
+        body = event.get('body')
+        if isinstance(body, str):
+            body = json.loads(body)
+        elif body is None:
+            body = {}
+
+        prompt = body.get("prompt", "Write a short blog post about AI.")
+
+        client = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+        full_prompt = f"\n\nHuman: {prompt}\n\nAssistant:"
+
+        payload = {
+            "prompt": full_prompt,
+            "max_tokens_to_sample": 300,
+            "temperature": 0.7,
+            "stop_sequences": ["\n\nHuman:"]
+        }
+
+        response = client.invoke_model(
+            modelId="anthropic.claude-v2:1",  # Claude 2.1
+            body=json.dumps(payload),
+            contentType="application/json",
+            accept="application/json"
+        )
+
+        result = json.loads(response["body"].read())
+
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'response': result.get('completion')})
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
+Step 2.2 – Zip and Deploy the Lambda
+bash
+Copy
+Edit
+cd lambda
+zip ../function.zip lambda_function.py
+cd ..
+
+Then deploy:
+
+bash
+aws lambda create-function \
+  --function-name bedrockContentGenerator \
+  --runtime python3.11 \
+  --role arn:aws:iam::<your-account-id>:role/lambda-bedrock-role \
+  --handler lambda_function.lambda_handler \
+  --zip-file fileb://function.zip
+Replace <your-account-id> with your actual account ID.
+
+Step 2.3 – Set Lambda Timeout
+Increase default timeout to avoid Bedrock timing out:
+
+bash
+aws lambda update-function-configuration \
+  --function-name bedrockContentGenerator \
+  --timeout 30
+
+Or do this in the AWS Console under:
+Lambda > Configuration > General Configuration > Edit
+
+✅ PHASE 3: API Gateway Setup
+Step 3.1 – Create an HTTP API
+Go to API Gateway > Create API > HTTP API
+
+Add an integration:
+Integration type: Lambda
+Function: bedrockContentGenerator
+Click Next
+
+Step 3.2 – Add a Route
+Create a route:
+Method: POST
+Path: /generate
+Click Next and deploy to a stage:
+Stage name: prod
+
+✅ Final endpoint will look like:
+https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/generate
+
+Copy this URL — you'll use it in Streamlit.
+
+Step 3.3 – Grant API Gateway Permission to Invoke Lambda
+bash
+
+aws lambda add-permission \
+  --function-name bedrockContentGenerator \
+  --statement-id allow-apigateway-prod \
+  --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn arn:aws:execute-api:us-east-1:<your-account-id>:<api-id>/prod/POST/generate
+Replace with your actual AWS Account ID and API ID.
+
+✅ PHASE 4: Streamlit Frontend
+
+Step 4.1 – Install Dependencies
+bash
+Copy
+Edit
+pip install streamlit requests
+
+Step 4.2 – Create app.py
+python
+Copy
+Edit
+import streamlit as st
+import requests
+
+st.title("🧠 AI Content Generator with Bedrock")
+st.markdown("Enter a prompt and generate high-quality content using Amazon Bedrock + Claude 2.1.")
+
+prompt = st.text_area("Your Prompt:", height=150)
+
+if st.button("Generate"):
+    if not prompt.strip():
+        st.warning("Please enter a prompt.")
+    else:
+        with st.spinner("Generating content..."):
+            url = "https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/generate"  # Replace with your full API URL
+            headers = {"Content-Type": "application/json"}
+            payload = {"prompt": prompt}
+
+            try:
+                response = requests.post(url, json=payload)
+                response.raise_for_status()
+                result = response.json().get("response")
+                st.subheader("📝 Generated Content")
+                st.write(result)
+            except requests.exceptions.RequestException as e:
+                st.error(f"Error calling API: {e}")
+
+Step 4.3 – Run Streamlit App
+bash
+streamlit run app.py
+Try this sample prompt:
+
+Write a motivational Instagram caption for Black women pivoting into AI/Cloud after 40.
+
+✅ PHASE 5: Testing & Debugging Tips
+Use curl to test your API outside of Streamlit:
+
+curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Write a welcome message for a tech bootcamp newsletter."}'
+
+Check CloudWatch logs for deeper errors:
+
+Go to CloudWatch > Log groups > /aws/lambda/bedrockContentGenerator
+
+View latest log stream for real-time Lambda output
+
