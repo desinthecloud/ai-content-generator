@@ -1,0 +1,16 @@
+Shutdown Instructions
+
+To stop being billed by AWS:
+
+✅ MUST DO
+❌ Delete API Gateway: HTTP APIs are billed per request
+❌ Delete CloudWatch log group: Log storage is billable
+✅ Stop making requests to Claude: Bedrock only charges per use
+
+⚠️ OPTIONAL
+❌ Delete Lambda function
+❌ Delete zipped code (function.zip)
+
+✅ Free to Keep
+IAM roles
+Model access permissions
